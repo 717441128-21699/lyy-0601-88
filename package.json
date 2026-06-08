@@ -1,0 +1,28 @@
+{
+  "name": "efficiency-goal-sdk",
+  "version": "1.0.0",
+  "description": "个人效率类库 SDK - 提供目标管理、任务拆分、进度追踪等能力",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node dist/examples/basic.js",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "goal",
+    "task",
+    "productivity",
+    "efficiency",
+    "sdk",
+    "okr",
+    "todo"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
