@@ -1,7 +1,11 @@
-import { SDKOptions, StorageAdapter } from './types';
+import { SDKOptions, StorageAdapter, ImportOptions, ImportResult } from './types';
 import { I18n } from './i18n';
 import { ScoringEngine } from './scoring';
+import { Validator } from './validation';
+import { ImportExportManager } from './importExport';
 import { MemoryStorage } from './storage/MemoryStorage';
+import { FileStorage } from './storage/FileStorage';
+import { AsyncStorageAdapter } from './storage/AsyncStorageAdapter';
 import { GoalManager } from './modules/GoalManager';
 import { TaskManager } from './modules/TaskManager';
 import { ProgressCalculator } from './modules/ProgressCalculator';
@@ -13,7 +17,11 @@ import { RecommendationEngine } from './modules/RecommendationEngine';
 export * from './types';
 export { I18n } from './i18n';
 export { ScoringEngine, defaultScoringRule } from './scoring';
+export { Validator } from './validation';
+export { ImportExportManager } from './importExport';
 export { MemoryStorage } from './storage/MemoryStorage';
+export { FileStorage } from './storage/FileStorage';
+export { AsyncStorageAdapter } from './storage/AsyncStorageAdapter';
 export { GoalManager } from './modules/GoalManager';
 export { TaskManager } from './modules/TaskManager';
 export { ProgressCalculator } from './modules/ProgressCalculator';
@@ -25,7 +33,9 @@ export { RecommendationEngine } from './modules/RecommendationEngine';
 class EfficiencyGoalSDK {
   public readonly i18n: I18n;
   public readonly scoring: ScoringEngine;
+  public readonly validator: Validator;
   public readonly storage: StorageAdapter;
+  public readonly importExport: ImportExportManager;
 
   public readonly goals: GoalManager;
   public readonly tasks: TaskManager;
@@ -38,13 +48,15 @@ class EfficiencyGoalSDK {
   constructor(options: SDKOptions = {}) {
     this.i18n = new I18n(options.language || 'zh-CN');
     this.scoring = new ScoringEngine(options.scoringRule);
+    this.validator = new Validator(options.strictValidation || false);
     this.storage = options.storageAdapter || new MemoryStorage();
+    this.importExport = new ImportExportManager(this.storage);
 
-    this.goals = new GoalManager(this.storage);
-    this.tasks = new TaskManager(this.storage);
+    this.goals = new GoalManager(this.storage, this.validator);
+    this.tasks = new TaskManager(this.storage, this.validator);
     this.progress = new ProgressCalculator(this.i18n);
     this.reminders = new ReminderGenerator(this.i18n, this.storage);
-    this.reviews = new ReviewManager(this.storage);
+    this.reviews = new ReviewManager(this.storage, this.validator);
     this.stats = new StatsReporter(this.i18n, this.scoring);
     this.recommendations = new RecommendationEngine(this.i18n, this.progress);
   }
@@ -55,6 +67,10 @@ class EfficiencyGoalSDK {
 
   setScoringRule(rule: Parameters<ScoringEngine['setRule']>[0]): void {
     this.scoring.setRule(rule);
+  }
+
+  setStrictValidation(strict: boolean): void {
+    this.validator.setStrictMode(strict);
   }
 
   async getAllGoals() {
@@ -112,6 +128,15 @@ class EfficiencyGoalSDK {
       this.getAllTasks(),
     ]);
     return this.reminders.generateAllReminders(goals, tasks);
+  }
+
+  async markReminderAsRead(reminderId: string) {
+    return this.reminders.markReminderAsRead(reminderId);
+  }
+
+  async getAllReminders() {
+    if (!this.storage) return [];
+    return this.storage.listReminders();
   }
 
   async mergeDuplicateTasks() {
@@ -175,6 +200,11 @@ class EfficiencyGoalSDK {
     const goal = await this.goals.getGoal(goalId);
     if (!goal) return null;
 
+    const validation = this.validator.validateCompletionEvidence({ type, content, description });
+    if (!validation.success) {
+      throw new Error(validation.error?.message || '证据验证失败');
+    }
+
     const updatedGoal = this.reviews.addEvidenceToGoal(goal, type, content, description);
     await this.goals.updateGoal(goalId, { evidences: updatedGoal.evidences });
     return updatedGoal.evidences[updatedGoal.evidences.length - 1];
@@ -183,6 +213,11 @@ class EfficiencyGoalSDK {
   async addEvidenceToTask(taskId: string, type: any, content: string, description?: string) {
     const task = await this.tasks.getTask(taskId);
     if (!task) return null;
+
+    const validation = this.validator.validateCompletionEvidence({ type, content, description });
+    if (!validation.success) {
+      throw new Error(validation.error?.message || '证据验证失败');
+    }
 
     const updatedTask = this.reviews.addEvidenceToTask(task, type, content, description);
     await this.tasks.updateTask(taskId, { evidences: updatedTask.evidences });
@@ -211,6 +246,14 @@ class EfficiencyGoalSDK {
   async getWorkloadBalance(dailyCapacityHours: number = 8) {
     const tasks = await this.getAllTasks();
     return this.recommendations.getWorkloadBalanceSuggestions(tasks, dailyCapacityHours);
+  }
+
+  async exportData(options?: { pretty?: boolean; exportedBy?: string }): Promise<string> {
+    return this.importExport.exportData(options);
+  }
+
+  async importData(jsonString: string, options?: ImportOptions): Promise<ImportResult> {
+    return this.importExport.importData(jsonString, options);
   }
 }
 

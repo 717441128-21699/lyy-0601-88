@@ -9,37 +9,46 @@ import {
   SplitTaskOptions,
 } from '../types';
 import { generateId, getPriorityOrder, isSimilar, addDays } from '../utils';
+import { Validator } from '../validation';
 
 class TaskManager {
   private storage?: StorageAdapter;
+  private validator: Validator;
 
-  constructor(storage?: StorageAdapter) {
+  constructor(storage?: StorageAdapter, validator?: Validator) {
     this.storage = storage;
+    this.validator = validator || new Validator();
   }
 
   createTask(input: CreateTaskInput): Task {
+    const validation = this.validator.validateCreateTaskInput(input);
+    if (!validation.success) {
+      throw new Error(validation.error?.message || '创建任务失败');
+    }
+
+    const normalizedInput = validation.data!;
     const now = new Date();
 
     const task: Task = {
       id: generateId(),
-      title: input.title,
-      description: input.description,
-      goalId: input.goalId,
-      priority: input.priority || 'medium',
+      title: normalizedInput.title,
+      description: normalizedInput.description,
+      goalId: normalizedInput.goalId,
+      priority: normalizedInput.priority || 'medium',
       status: 'todo',
       progress: 0,
-      estimatedMinutes: input.estimatedMinutes,
-      dueDate: input.dueDate,
-      startDate: input.startDate,
-      parentTaskId: input.parentTaskId,
+      estimatedMinutes: normalizedInput.estimatedMinutes,
+      dueDate: normalizedInput.dueDate,
+      startDate: normalizedInput.startDate,
+      parentTaskId: normalizedInput.parentTaskId,
       subtaskIds: [],
       blockers: [],
       evidences: [],
-      tags: input.tags || [],
+      tags: normalizedInput.tags || [],
       reminderIds: [],
       order: 0,
-      recurrenceRule: input.recurrenceRule,
-      metadata: input.metadata || {},
+      recurrenceRule: normalizedInput.recurrenceRule,
+      metadata: normalizedInput.metadata || {},
       createdAt: now,
       updatedAt: now,
     };
@@ -131,10 +140,16 @@ class TaskManager {
     parentTaskId: string,
     options: SplitTaskOptions = {}
   ): Promise<Task[] | null> {
+    const validation = this.validator.validateSplitTaskOptions(options);
+    if (!validation.success) {
+      throw new Error(validation.error?.message || '拆分任务失败');
+    }
+
     const parentTask = await this.getTask(parentTaskId);
     if (!parentTask) return null;
 
-    const { parts = 3, subtaskTitles, autoEstimate = true } = options;
+    const validatedOptions = validation.data!;
+    const { parts = 3, subtaskTitles, autoEstimate = true } = validatedOptions;
     const subtasks: Task[] = [];
     const now = new Date();
 

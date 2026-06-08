@@ -7,8 +7,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node dist/examples/basic.js",
-    "lint": "tsc --noEmit"
+    "test": "ts-node src/test/sdk.test.ts",
+    "test:basic": "ts-node src/examples/basic.ts",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
   },
   "keywords": [
     "goal",
@@ -22,6 +24,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^25.9.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

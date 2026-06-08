@@ -12,6 +12,30 @@ export type RiskLevel = 'none' | 'low' | 'medium' | 'high' | 'critical';
 
 export type Language = 'zh-CN' | 'en-US' | 'ja-JP' | 'ko-KR';
 
+export type ErrorCode = 
+  | 'EMPTY_TITLE'
+  | 'INVALID_DATE'
+  | 'INVALID_PARTS'
+  | 'MISSING_REQUIRED_FIELD'
+  | 'INVALID_SCORING_RULE'
+  | 'DUPLICATE_ID'
+  | 'NOT_FOUND'
+  | 'VERSION_MISMATCH'
+  | 'UNKNOWN_ERROR';
+
+export interface SDKError {
+  code: ErrorCode;
+  message: string;
+  field?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ValidationResult<T> {
+  success: boolean;
+  data?: T;
+  error?: SDKError;
+}
+
 export interface Blocker {
   id: string;
   description: string;
@@ -121,10 +145,13 @@ export interface Task {
 
 export interface DailyChecklist {
   date: Date;
-  tasks: Task[];
+  todayTasks: Task[];
+  overdueTasks: Task[];
+  upcomingTasks: Task[];
   goalsInProgress: Goal[];
   milestonesDue: Milestone[];
-  reminders: Reminder[];
+  unreadReminders: Reminder[];
+  readReminders: Reminder[];
   suggestedActions: string[];
 }
 
@@ -172,6 +199,7 @@ export interface SDKOptions {
   scoringRule?: Partial<ScoringRule>;
   storageAdapter?: StorageAdapter;
   timezone?: string;
+  strictValidation?: boolean;
 }
 
 export interface StorageAdapter {
@@ -244,4 +272,38 @@ export interface NextAction {
   priority: Priority;
   reason: string;
   estimatedMinutes?: number;
+}
+
+export interface ExportData {
+  version: string;
+  exportedAt: Date;
+  exportedBy?: string;
+  goals: Goal[];
+  tasks: Task[];
+  reminders: Reminder[];
+  reviews: ReviewRecord[];
+}
+
+export interface ImportOptions {
+  duplicateStrategy: 'skip' | 'overwrite' | 'rename' | 'error';
+  versionCheck: 'strict' | 'compatible' | 'ignore';
+  onProgress?: (current: number, total: number) => void;
+}
+
+export interface ImportResult {
+  success: boolean;
+  imported: {
+    goals: number;
+    tasks: number;
+    reminders: number;
+    reviews: number;
+  };
+  skipped: {
+    goals: number;
+    tasks: number;
+    reminders: number;
+    reviews: number;
+  };
+  errors: SDKError[];
+  warnings: string[];
 }

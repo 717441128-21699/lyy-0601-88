@@ -167,21 +167,33 @@ class ReminderGenerator {
     goals: Goal[],
     tasks: Task[],
     reminders: Reminder[],
-    date: Date = new Date()
+    date: Date = new Date(),
+    upcomingDays: number = 3
   ): DailyChecklist {
     const todayStart = startOfDay(date);
     const todayEnd = endOfDay(date);
+    const upcomingEnd = endOfDay(addDays(date, upcomingDays));
 
-    const todaysTasks = tasks.filter(task => {
+    const todayTasks = tasks.filter(task => {
       if (task.status === 'completed' || task.status === 'cancelled') return false;
-
       if (task.dueDate && task.dueDate >= todayStart && task.dueDate <= todayEnd) {
         return true;
       }
       if (task.status === 'in_progress') return true;
       if (task.blockers.some(b => !b.resolvedAt)) return true;
-
       return false;
+    });
+
+    const overdueTasks = tasks.filter(task => {
+      if (task.status === 'completed' || task.status === 'cancelled') return false;
+      if (!task.dueDate) return false;
+      return task.dueDate < todayStart;
+    });
+
+    const upcomingTasks = tasks.filter(task => {
+      if (task.status === 'completed' || task.status === 'cancelled') return false;
+      if (!task.dueDate) return false;
+      return task.dueDate > todayEnd && task.dueDate <= upcomingEnd;
     });
 
     const goalsInProgress = goals.filter(
@@ -197,39 +209,73 @@ class ReminderGenerator {
       )
     );
 
-    const todaysReminders = reminders.filter(
+    const unreadReminders = reminders.filter(
       r =>
         !r.isRead &&
         r.scheduledAt >= todayStart &&
         r.scheduledAt <= todayEnd
     );
 
-    const suggestedActions = this.generateSuggestedActions(todaysTasks, goalsInProgress);
+    const readReminders = reminders.filter(
+      r =>
+        r.isRead &&
+        r.scheduledAt >= todayStart &&
+        r.scheduledAt <= todayEnd
+    );
 
-    todaysTasks.sort((a, b) => {
+    const suggestedActions = this.generateSuggestedActions(
+      todayTasks,
+      overdueTasks,
+      upcomingTasks,
+      goalsInProgress
+    );
+
+    todayTasks.sort((a, b) => {
       const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
       return priorityOrder[a.priority] - priorityOrder[b.priority];
     });
 
+    overdueTasks.sort((a, b) => {
+      if (!a.dueDate || !b.dueDate) return 0;
+      return a.dueDate.getTime() - b.dueDate.getTime();
+    });
+
+    upcomingTasks.sort((a, b) => {
+      if (!a.dueDate || !b.dueDate) return 0;
+      return a.dueDate.getTime() - b.dueDate.getTime();
+    });
+
     return {
       date,
-      tasks: todaysTasks,
+      todayTasks,
+      overdueTasks,
+      upcomingTasks,
       goalsInProgress,
       milestonesDue,
-      reminders: todaysReminders,
+      unreadReminders,
+      readReminders,
       suggestedActions,
     };
   }
 
-  private generateSuggestedActions(tasks: Task[], goals: Goal[]): string[] {
+  private generateSuggestedActions(
+    todayTasks: Task[],
+    overdueTasks: Task[],
+    upcomingTasks: Task[],
+    goals: Goal[]
+  ): string[] {
     const actions: string[] = [];
 
-    const urgentTasks = tasks.filter(t => t.priority === 'urgent' && t.status !== 'completed');
+    if (overdueTasks.length > 0) {
+      actions.push(`尽快处理 ${overdueTasks.length} 个逾期任务`);
+    }
+
+    const urgentTasks = todayTasks.filter(t => t.priority === 'urgent' && t.status !== 'completed');
     if (urgentTasks.length > 0) {
       actions.push(`优先处理 ${urgentTasks.length} 个紧急任务`);
     }
 
-    const blockedTasks = tasks.filter(t => t.blockers.some(b => !b.resolvedAt));
+    const blockedTasks = todayTasks.filter(t => t.blockers.some(b => !b.resolvedAt));
     if (blockedTasks.length > 0) {
       actions.push(`解决 ${blockedTasks.length} 个任务的阻塞问题`);
     }
@@ -239,7 +285,11 @@ class ReminderGenerator {
       actions.push(`推进 ${inProgressGoals.length} 个进行中的目标`);
     }
 
-    const tasksWithoutProgress = tasks.filter(t => t.progress === 0 && t.status !== 'completed');
+    if (upcomingTasks.length > 0) {
+      actions.push(`未来 ${upcomingTasks.length} 个任务即将到期，提前规划`);
+    }
+
+    const tasksWithoutProgress = todayTasks.filter(t => t.progress === 0 && t.status !== 'completed');
     if (tasksWithoutProgress.length > 3) {
       actions.push('开始处理尚未启动的任务');
     }
@@ -256,10 +306,21 @@ class ReminderGenerator {
     return [];
   }
 
-  markReminderAsRead(reminderId: string, reminders: Reminder[]): Reminder[] {
-    return reminders.map(r =>
-      r.id === reminderId ? { ...r, isRead: true, sentAt: new Date() } : r
-    );
+  async markReminderAsRead(reminderId: string): Promise<Reminder | null> {
+    if (!this.storage) return null;
+
+    const allReminders = await this.storage.listReminders();
+    const reminder = allReminders.find(r => r.id === reminderId);
+    if (!reminder) return null;
+
+    const updatedReminder: Reminder = {
+      ...reminder,
+      isRead: true,
+      sentAt: new Date(),
+    };
+
+    await this.storage.saveReminder(updatedReminder);
+    return updatedReminder;
   }
 
   getUpcomingReminders(reminders: Reminder[], hours: number = 24): Reminder[] {

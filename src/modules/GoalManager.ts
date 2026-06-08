@@ -6,54 +6,70 @@ import {
   Priority,
   StorageAdapter,
   ListOptions,
+  SDKError,
+  ValidationResult,
 } from '../types';
 import { generateId, getDaysBetween, getPeriodDates, addDays } from '../utils';
+import { Validator } from '../validation';
 
 class GoalManager {
   private storage?: StorageAdapter;
+  private validator: Validator;
 
-  constructor(storage?: StorageAdapter) {
+  constructor(storage?: StorageAdapter, validator?: Validator) {
     this.storage = storage;
+    this.validator = validator || new Validator();
   }
 
-  createGoal(input: CreateGoalInput): Goal {
+  async createGoal(input: CreateGoalInput): Promise<Goal> {
+    const validation = this.validator.validateCreateGoalInput(input);
+    if (!validation.success) {
+      throw new Error(validation.error?.message || '创建目标失败');
+    }
+
+    const normalizedInput = validation.data!;
     const now = new Date();
-    const startDate = input.startDate || now;
+    const startDate = normalizedInput.startDate || now;
 
     const goal: Goal = {
       id: generateId(),
-      title: input.title,
-      description: input.description,
-      category: input.category,
-      tags: input.tags || [],
-      priority: input.priority || 'medium',
+      title: normalizedInput.title,
+      description: normalizedInput.description,
+      category: normalizedInput.category,
+      tags: normalizedInput.tags || [],
+      priority: normalizedInput.priority || 'medium',
       status: 'not_started',
       progress: 0,
       startDate,
-      targetDate: input.targetDate,
-      period: input.period,
-      parentGoalId: input.parentGoalId,
+      targetDate: normalizedInput.targetDate,
+      period: normalizedInput.period,
+      parentGoalId: normalizedInput.parentGoalId,
       milestones: [],
       taskIds: [],
       blockers: [],
       reviews: [],
       evidences: [],
       reminderIds: [],
-      metadata: input.metadata || {},
+      metadata: normalizedInput.metadata || {},
       createdAt: now,
       updatedAt: now,
     };
 
     if (this.storage) {
-      this.storage.saveGoal(goal);
+      await this.storage.saveGoal(goal);
     }
 
     return goal;
   }
 
-  createPeriodicGoal(input: CreateGoalInput, generateCount: number = 1): Goal[] {
+  async createPeriodicGoal(input: CreateGoalInput, generateCount: number = 1): Promise<Goal[]> {
+    const validation = this.validator.validateCreateGoalInput(input);
+    if (!validation.success) {
+      throw new Error(validation.error?.message || '创建周期目标失败');
+    }
+
     if (!input.period || input.period === 'custom') {
-      return [this.createGoal(input)];
+      return [await this.createGoal(input)];
     }
 
     const goals: Goal[] = [];
@@ -61,7 +77,7 @@ class GoalManager {
 
     for (let i = 0; i < generateCount; i++) {
       const periodDates = getPeriodDates(input.period, currentStart);
-      const goal = this.createGoal({
+      const goal = await this.createGoal({
         ...input,
         startDate: periodDates.start,
         targetDate: periodDates.end,
@@ -98,7 +114,7 @@ class GoalManager {
     };
 
     if (this.storage) {
-      this.storage.saveGoal(updatedGoal);
+      await this.storage.saveGoal(updatedGoal);
     }
 
     return updatedGoal;

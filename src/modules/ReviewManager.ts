@@ -6,12 +6,15 @@ import {
   StorageAdapter,
 } from '../types';
 import { generateId } from '../utils';
+import { Validator } from '../validation';
 
 class ReviewManager {
   private storage?: StorageAdapter;
+  private validator: Validator;
 
-  constructor(storage?: StorageAdapter) {
+  constructor(storage?: StorageAdapter, validator?: Validator) {
     this.storage = storage;
+    this.validator = validator || new Validator();
   }
 
   createReview(

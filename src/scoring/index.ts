@@ -19,15 +19,57 @@ const defaultScoringRule: ScoringRule = {
   reviewBonus: 10,
 };
 
+function mergeScoringRule(base: ScoringRule, partial?: Partial<ScoringRule>): ScoringRule {
+  if (!partial) return { ...base };
+
+  const merged: ScoringRule = {
+    ...base,
+    ...partial,
+    priorityWeights: {
+      ...base.priorityWeights,
+      ...(partial.priorityWeights || {}),
+    },
+  };
+
+  const numericFields = [
+    'onTimeBonus', 'earlyBonus', 'latePenalty', 'blockerPenalty',
+    'milestoneBonus', 'evidenceBonus', 'reviewBonus'
+  ] as const;
+
+  for (const field of numericFields) {
+    const val = merged[field];
+    if (typeof val !== 'number' || isNaN(val)) {
+      (merged as any)[field] = base[field] as number;
+    }
+  }
+
+  const priorities: Priority[] = ['urgent', 'high', 'medium', 'low'];
+  for (const p of priorities) {
+    const val = merged.priorityWeights[p];
+    if (typeof val !== 'number' || isNaN(val) || val < 0) {
+      merged.priorityWeights[p] = base.priorityWeights[p];
+    }
+  }
+
+  return merged;
+}
+
+function safeNumber(value: number | undefined | null, fallback: number = 0): number {
+  if (value === undefined || value === null || typeof value !== 'number' || isNaN(value)) {
+    return fallback;
+  }
+  return value;
+}
+
 class ScoringEngine {
   private rule: ScoringRule;
 
   constructor(customRule?: Partial<ScoringRule>) {
-    this.rule = { ...defaultScoringRule, ...customRule };
+    this.rule = mergeScoringRule(defaultScoringRule, customRule);
   }
 
   setRule(customRule: Partial<ScoringRule>): void {
-    this.rule = { ...this.rule, ...customRule };
+    this.rule = mergeScoringRule(this.rule, customRule);
   }
 
   getRule(): ScoringRule {
@@ -38,59 +80,64 @@ class ScoringEngine {
     let score = 0;
     const now = new Date();
 
-    score += this.rule.priorityWeights[goal.priority] * (goal.progress / 100);
+    const priorityWeight = safeNumber(this.rule.priorityWeights[goal.priority], 0);
+    const progress = safeNumber(goal.progress, 0);
+    score += priorityWeight * (progress / 100);
 
     if (goal.completedAt) {
       const completedBeforeTarget = goal.completedAt <= goal.targetDate;
       const completedBeforeStart = goal.completedAt <= goal.startDate;
 
       if (completedBeforeStart) {
-        score += this.rule.earlyBonus;
+        score += safeNumber(this.rule.earlyBonus, 0);
       } else if (completedBeforeTarget) {
-        score += this.rule.onTimeBonus;
+        score += safeNumber(this.rule.onTimeBonus, 0);
       } else {
-        score += this.rule.latePenalty;
+        score += safeNumber(this.rule.latePenalty, 0);
       }
     } else if (goal.targetDate < now && goal.status !== 'completed') {
-      score += this.rule.latePenalty;
+      score += safeNumber(this.rule.latePenalty, 0);
     }
 
     const unresolvedBlockers = goal.blockers.filter(b => !b.resolvedAt).length;
-    score += unresolvedBlockers * this.rule.blockerPenalty;
+    score += unresolvedBlockers * safeNumber(this.rule.blockerPenalty, 0);
 
     const completedMilestones = goal.milestones.filter(m => m.status === 'completed').length;
-    score += completedMilestones * this.rule.milestoneBonus;
+    score += completedMilestones * safeNumber(this.rule.milestoneBonus, 0);
 
-    score += goal.evidences.length * this.rule.evidenceBonus;
-    score += goal.reviews.length * this.rule.reviewBonus;
+    score += goal.evidences.length * safeNumber(this.rule.evidenceBonus, 0);
+    score += goal.reviews.length * safeNumber(this.rule.reviewBonus, 0);
 
-    return Math.round(score);
+    const result = Math.round(safeNumber(score, 0));
+    return isNaN(result) ? 0 : result;
   }
 
   calculateTaskScore(task: Task): number {
     let score = 0;
     const now = new Date();
 
-    const progressMultiplier = task.status === 'completed' ? 1 : task.progress / 100;
-    score += this.rule.priorityWeights[task.priority] * progressMultiplier;
+    const priorityWeight = safeNumber(this.rule.priorityWeights[task.priority], 0);
+    const progressMultiplier = task.status === 'completed' ? 1 : safeNumber(task.progress, 0) / 100;
+    score += priorityWeight * progressMultiplier;
 
     if (task.completedAt && task.dueDate) {
       const completedBeforeDue = task.completedAt <= task.dueDate;
       if (completedBeforeDue) {
-        score += this.rule.onTimeBonus;
+        score += safeNumber(this.rule.onTimeBonus, 0);
       } else {
-        score += this.rule.latePenalty;
+        score += safeNumber(this.rule.latePenalty, 0);
       }
     } else if (task.dueDate && task.dueDate < now && task.status !== 'completed') {
-      score += this.rule.latePenalty;
+      score += safeNumber(this.rule.latePenalty, 0);
     }
 
     const unresolvedBlockers = task.blockers.filter(b => !b.resolvedAt).length;
-    score += unresolvedBlockers * this.rule.blockerPenalty;
+    score += unresolvedBlockers * safeNumber(this.rule.blockerPenalty, 0);
 
-    score += task.evidences.length * this.rule.evidenceBonus;
+    score += task.evidences.length * safeNumber(this.rule.evidenceBonus, 0);
 
-    return Math.round(score);
+    const result = Math.round(safeNumber(score, 0));
+    return isNaN(result) ? 0 : result;
   }
 
   calculateProductivityScore(tasks: Task[], goals: Goal[], periodDays: number = 7): number {
@@ -110,21 +157,22 @@ class ScoringEngine {
     );
 
     completedTasks.forEach(task => {
-      totalScore += this.calculateTaskScore(task);
+      totalScore += safeNumber(this.calculateTaskScore(task), 0);
     });
 
     completedGoals.forEach(goal => {
-      totalScore += this.calculateGoalScore(goal);
+      totalScore += safeNumber(this.calculateGoalScore(goal), 0);
     });
 
     const maxPossibleScore = (tasks.length + goals.length) *
-      (this.rule.priorityWeights.urgent + this.rule.onTimeBonus);
+      (safeNumber(this.rule.priorityWeights.urgent, 0) + safeNumber(this.rule.onTimeBonus, 0));
 
-    if (maxPossibleScore === 0) {
+    if (maxPossibleScore === 0 || isNaN(maxPossibleScore)) {
       return 0;
     }
 
-    return Math.min(100, Math.max(0, Math.round((totalScore / maxPossibleScore) * 100)));
+    const result = Math.round((safeNumber(totalScore, 0) / maxPossibleScore) * 100);
+    return Math.min(100, Math.max(0, isNaN(result) ? 0 : result));
   }
 }
 
